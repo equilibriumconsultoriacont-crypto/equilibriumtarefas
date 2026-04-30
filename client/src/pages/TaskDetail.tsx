@@ -382,7 +382,7 @@ export default function TaskDetail() {
               </div>
             )}
             <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(36,100,108,0.1)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.2)" }}>
-              O e-mail será enviado com o template padrão do escritório Equilíbrio com os dados da tarefa.
+              O e-mail será enviado com o template padrão do escritório Equilibrium com os dados da tarefa.
             </div>
             <div className="flex gap-3 pt-1">
               <Button type="button" variant="outline" onClick={() => setEmailDialogOpen(false)} className="flex-1" style={{ borderColor: "#1e4f5c", color: "#a1a1aa" }}>Cancelar</Button>

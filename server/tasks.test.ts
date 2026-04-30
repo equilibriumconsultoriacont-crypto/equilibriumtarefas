@@ -71,15 +71,15 @@ describe("Email subject generation", () => {
   it("should generate correct email subject for DAS task", () => {
     const taskType = "DAS";
     const competencia = "03/2026";
-    const subject = `Guia ${taskType} — Competência ${competencia} | Equilíbrio Consultoria`;
-    expect(subject).toBe("Guia DAS — Competência 03/2026 | Equilíbrio Consultoria");
+    const subject = `Guia ${taskType} — Competência ${competencia} | Equilibrium Consultoria`;
+    expect(subject).toBe("Guia DAS — Competência 03/2026 | Equilibrium Consultoria");
   });
 
   it("should generate correct email subject for NFS task", () => {
     const taskType = "NFS";
     const competencia = "04/2026";
-    const subject = `Guia ${taskType} — Competência ${competencia} | Equilíbrio Consultoria`;
-    expect(subject).toBe("Guia NFS — Competência 04/2026 | Equilíbrio Consultoria");
+    const subject = `Guia ${taskType} — Competência ${competencia} | Equilibrium Consultoria`;
+    expect(subject).toBe("Guia NFS — Competência 04/2026 | Equilibrium Consultoria");
   });
 });
 

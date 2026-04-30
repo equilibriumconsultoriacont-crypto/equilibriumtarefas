@@ -27,6 +27,8 @@ import {
 } from "./db";
 import { buildAlertEmailHtml, buildGuiaEmailHtml, sendEmail } from "./email";
 import { storagePut } from "./storage";
+import { getUserByEmail, upsertUser } from "./db";
+import bcryptjs from "bcryptjs";
 
 // ─── Clients Router ───────────────────────────────────────────────────────────
 const clientsRouter = router({
@@ -306,7 +308,7 @@ const emailRouter = router({
 
       const subject =
         input.subject ||
-        `Guia ${task.taskType} — Competência ${task.competencia} | Equilíbrio Consultoria`;
+        `Guia ${task.taskType} — Competência ${task.competencia} | Equilibrium Consultoria`;
 
       const html = buildGuiaEmailHtml({
         clientName: input.clientName,
@@ -402,7 +404,7 @@ const emailRouter = router({
       try {
         await sendEmail({
           to: alertEmail,
-          subject: `⚠️ ${dueSoon.length} tarefa(s) vencem em 3 dias — Equilíbrio`,
+          subject: `⚠️ ${dueSoon.length} tarefa(s) vencem em 3 dias — Equilibrium`,
           html,
         });
         sent++;
@@ -427,7 +429,7 @@ const emailRouter = router({
       try {
         await sendEmail({
           to: alertEmail,
-          subject: `🚨 ${overdue.length} tarefa(s) vencida(s) sem conclusão — Equilíbrio`,
+          subject: `🚨 ${overdue.length} tarefa(s) vencida(s) sem conclusão — Equilibrium`,
           html,
         });
         sent++;
@@ -449,6 +451,33 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
+    login: publicProcedure
+      .input(z.object({ email: z.string().email(), password: z.string().min(6) }))
+      .mutation(async ({ input, ctx }) => {
+        const user = await getUserByEmail(input.email);
+        if (!user || !user.passwordHash) {
+          throw new Error("Credenciais inválidas");
+        }
+        const isValidPassword = await bcryptjs.compare(input.password, user.passwordHash);
+        if (!isValidPassword) {
+          throw new Error("Credenciais inválidas");
+        }
+        await upsertUser({
+          email: user.email,
+          lastSignedIn: new Date(),
+        });
+        const { sdk } = await import("./_core/sdk");
+        const sessionToken = await sdk.createSessionToken(user.id.toString(), {
+          name: user.name || user.email,
+          expiresInMs: 1000 * 60 * 60 * 24 * 365,
+        });
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, {
+          ...cookieOptions,
+          maxAge: 1000 * 60 * 60 * 24 * 365,
+        });
+        return { success: true, user };
+      }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

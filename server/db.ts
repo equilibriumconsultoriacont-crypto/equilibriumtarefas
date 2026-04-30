@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   Client,
@@ -37,22 +37,33 @@ export async function getDb() {
 
 // ─── Users ───────────────────────────────────────────────────────────────────
 export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) throw new Error("User openId is required for upsert");
+  if (!user.email) throw new Error("User email is required for upsert");
   const db = await getDb();
   if (!db) return;
 
-  const values: InsertUser = { openId: user.openId };
+  const values: InsertUser = { email: user.email };
   const updateSet: Record<string, unknown> = {};
-  const textFields = ["name", "email", "loginMethod"] as const;
+  const textFields = ["name", "loginMethod"] as const;
   type TextField = (typeof textFields)[number];
   const assignNullable = (field: TextField) => {
     const value = user[field];
     if (value === undefined) return;
-    const normalized = value ?? null;
+    const normalized = value || undefined;
     values[field] = normalized;
     updateSet[field] = normalized;
   };
   textFields.forEach(assignNullable);
+  
+  if (user.openId !== undefined) {
+    values.openId = user.openId || undefined;
+    updateSet.openId = user.openId || undefined;
+  }
+  
+  if (user.passwordHash !== undefined) {
+    values.passwordHash = user.passwordHash || undefined;
+    updateSet.passwordHash = user.passwordHash || undefined;
+  }
+  
   if (user.lastSignedIn !== undefined) {
     values.lastSignedIn = user.lastSignedIn;
     updateSet.lastSignedIn = user.lastSignedIn;
@@ -60,13 +71,26 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   if (user.role !== undefined) {
     values.role = user.role;
     updateSet.role = user.role;
-  } else if (user.openId === ENV.ownerOpenId) {
-    values.role = "admin";
-    updateSet.role = "admin";
   }
-  if (!values.lastSignedIn) values.lastSignedIn = new Date();
-  if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+
+  if (!values.lastSignedIn) {
+    values.lastSignedIn = new Date();
+  }
+
+  if (Object.keys(updateSet).length === 0) {
+    updateSet.lastSignedIn = new Date();
+  }
+
+  await db.insert(users).values(values).onDuplicateKeyUpdate({
+    set: updateSet,
+  });
+}
+
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -80,7 +104,6 @@ export async function getUserByOpenId(openId: string) {
 export async function listClients(includeInactive = false): Promise<Client[]> {
   const db = await getDb();
   if (!db) return [];
-  const query = db.select().from(clients).orderBy(desc(clients.createdAt));
   if (!includeInactive) {
     return db.select().from(clients).where(eq(clients.active, true)).orderBy(clients.name);
   }
@@ -96,9 +119,9 @@ export async function getClientById(id: number): Promise<Client | undefined> {
 
 export async function createClient(data: InsertClient): Promise<number> {
   const db = await getDb();
-  if (!db) throw new Error("DB not available");
+  if (!db) throw new Error("Database not available");
   const result = await db.insert(clients).values(data);
-  return (result[0] as { insertId: number }).insertId;
+  return result[0].insertId;
 }
 
 export async function updateClient(id: number, data: Partial<InsertClient>): Promise<void> {
@@ -112,16 +135,16 @@ export async function listRecurringTasks(clientId?: number): Promise<RecurringTa
   const db = await getDb();
   if (!db) return [];
   if (clientId) {
-    return db.select().from(recurringTasks).where(eq(recurringTasks.clientId, clientId)).orderBy(recurringTasks.title);
+    return db.select().from(recurringTasks).where(eq(recurringTasks.clientId, clientId));
   }
-  return db.select().from(recurringTasks).orderBy(recurringTasks.clientId);
+  return db.select().from(recurringTasks);
 }
 
 export async function createRecurringTask(data: InsertRecurringTask): Promise<number> {
   const db = await getDb();
-  if (!db) throw new Error("DB not available");
+  if (!db) throw new Error("Database not available");
   const result = await db.insert(recurringTasks).values(data);
-  return (result[0] as { insertId: number }).insertId;
+  return result[0].insertId;
 }
 
 export async function updateRecurringTask(id: number, data: Partial<InsertRecurringTask>): Promise<void> {
@@ -133,19 +156,17 @@ export async function updateRecurringTask(id: number, data: Partial<InsertRecurr
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 export async function listTasks(filters?: {
   clientId?: number;
-  status?: Task["status"];
+  status?: string;
   competencia?: string;
 }): Promise<Task[]> {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [];
-  if (filters?.clientId) conditions.push(eq(tasks.clientId, filters.clientId));
-  if (filters?.status) conditions.push(eq(tasks.status, filters.status));
-  if (filters?.competencia) conditions.push(eq(tasks.competencia, filters.competencia));
-  if (conditions.length > 0) {
-    return db.select().from(tasks).where(and(...conditions)).orderBy(desc(tasks.dueDate));
-  }
-  return db.select().from(tasks).orderBy(desc(tasks.dueDate));
+  const allTasks = await db.select().from(tasks);
+  let filtered = allTasks;
+  if (filters?.clientId) filtered = filtered.filter((t) => t.clientId === filters.clientId);
+  if (filters?.status) filtered = filtered.filter((t) => t.status === filters.status);
+  if (filters?.competencia) filtered = filtered.filter((t) => t.competencia === filters.competencia);
+  return filtered.sort((a, b) => b.dueDate.getTime() - a.dueDate.getTime());
 }
 
 export async function getTaskById(id: number): Promise<Task | undefined> {
@@ -157,29 +178,15 @@ export async function getTaskById(id: number): Promise<Task | undefined> {
 
 export async function createTask(data: InsertTask): Promise<number> {
   const db = await getDb();
-  if (!db) throw new Error("DB not available");
+  if (!db) throw new Error("Database not available");
   const result = await db.insert(tasks).values(data);
-  return (result[0] as { insertId: number }).insertId;
+  return result[0].insertId;
 }
 
 export async function updateTask(id: number, data: Partial<InsertTask>): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.update(tasks).set(data).where(eq(tasks.id, id));
-}
-
-export async function taskExistsByRecurringAndCompetencia(
-  recurringTaskId: number,
-  competencia: string
-): Promise<boolean> {
-  const db = await getDb();
-  if (!db) return false;
-  const result = await db
-    .select({ id: tasks.id })
-    .from(tasks)
-    .where(and(eq(tasks.recurringTaskId, recurringTaskId), eq(tasks.competencia, competencia)))
-    .limit(1);
-  return result.length > 0;
 }
 
 export async function markOverdueTasks(): Promise<number> {
@@ -189,64 +196,52 @@ export async function markOverdueTasks(): Promise<number> {
   const result = await db
     .update(tasks)
     .set({ status: "VENCIDA" })
-    .where(
-      and(
-        lte(tasks.dueDate, now),
-        or(eq(tasks.status, "PENDENTE"), eq(tasks.status, "EM_ANDAMENTO"))
-      )
-    );
-  return (result[0] as { affectedRows: number }).affectedRows ?? 0;
+    .where(eq(tasks.status, "PENDENTE"));
+  return result[0].affectedRows ?? 0;
 }
 
-export async function getTasksDueSoon(daysAhead: number): Promise<Task[]> {
+export async function getTasksDueSoon(days: number = 3): Promise<Task[]> {
   const db = await getDb();
   if (!db) return [];
+  const allTasks = await db.select().from(tasks).where(eq(tasks.status, "PENDENTE"));
   const now = new Date();
-  const future = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
-  return db
+  const threshold = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  return allTasks
+    .filter((t) => t.dueDate <= threshold && t.dueDate >= now)
+    .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+}
+
+export async function taskExistsByRecurringAndCompetencia(
+  recurringTaskId: number,
+  competencia: string
+): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db
     .select()
     .from(tasks)
-    .where(
-      and(
-        gte(tasks.dueDate, now),
-        lte(tasks.dueDate, future),
-        or(eq(tasks.status, "PENDENTE"), eq(tasks.status, "EM_ANDAMENTO"))
-      )
-    )
-    .orderBy(tasks.dueDate);
+    .where(eq(tasks.recurringTaskId, recurringTaskId) && eq(tasks.competencia, competencia))
+    .limit(1);
+  return result.length > 0;
 }
 
 export async function getDashboardStats() {
   const db = await getDb();
-  if (!db) return { pendente: 0, em_andamento: 0, concluida: 0, vencida: 0, total: 0 };
-  const rows = await db
-    .select({ status: tasks.status, count: sql<number>`count(*)` })
-    .from(tasks)
-    .groupBy(tasks.status);
-  const stats = { pendente: 0, em_andamento: 0, concluida: 0, vencida: 0, total: 0 };
-  for (const row of rows) {
-    const count = Number(row.count);
-    stats.total += count;
-    if (row.status === "PENDENTE") stats.pendente = count;
-    if (row.status === "EM_ANDAMENTO") stats.em_andamento = count;
-    if (row.status === "CONCLUIDA") stats.concluida = count;
-    if (row.status === "VENCIDA") stats.vencida = count;
-  }
-  return stats;
+  if (!db) return { pendentes: 0, emAndamento: 0, concluidas: 0, vencidas: 0 };
+  const allTasks = await db.select().from(tasks);
+  return {
+    pendentes: allTasks.filter((t) => t.status === "PENDENTE").length,
+    emAndamento: allTasks.filter((t) => t.status === "EM_ANDAMENTO").length,
+    concluidas: allTasks.filter((t) => t.status === "CONCLUIDA").length,
+    vencidas: allTasks.filter((t) => t.status === "VENCIDA").length,
+  };
 }
 
-// ─── Task Files ───────────────────────────────────────────────────────────────
+// ─── Task Files ──────────────────────────────────────────────────────────────
 export async function listTaskFiles(taskId: number): Promise<TaskFile[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(taskFiles).where(eq(taskFiles.taskId, taskId)).orderBy(desc(taskFiles.uploadedAt));
-}
-
-export async function createTaskFile(data: InsertTaskFile): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  const result = await db.insert(taskFiles).values(data);
-  return (result[0] as { insertId: number }).insertId;
+  return db.select().from(taskFiles).where(eq(taskFiles.taskId, taskId));
 }
 
 export async function getTaskFileById(id: number): Promise<TaskFile | undefined> {
@@ -256,22 +251,26 @@ export async function getTaskFileById(id: number): Promise<TaskFile | undefined>
   return result[0];
 }
 
-// ─── Email Logs ───────────────────────────────────────────────────────────────
+export async function createTaskFile(data: InsertTaskFile): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(taskFiles).values(data);
+  return result[0].insertId;
+}
+
+// ─── Email Logs ──────────────────────────────────────────────────────────────
 export async function listEmailLogs(taskId?: number, clientId?: number): Promise<EmailLog[]> {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [];
-  if (taskId) conditions.push(eq(emailLogs.taskId, taskId));
-  if (clientId) conditions.push(eq(emailLogs.clientId, clientId));
-  if (conditions.length > 0) {
-    return db.select().from(emailLogs).where(and(...conditions)).orderBy(desc(emailLogs.sentAt));
-  }
-  return db.select().from(emailLogs).orderBy(desc(emailLogs.sentAt));
+  let query = db.select().from(emailLogs);
+  if (taskId) query = query.where(eq(emailLogs.taskId, taskId)) as any;
+  if (clientId) query = query.where(eq(emailLogs.clientId, clientId)) as any;
+  return query.orderBy(desc(emailLogs.sentAt));
 }
 
 export async function createEmailLog(data: InsertEmailLog): Promise<number> {
   const db = await getDb();
-  if (!db) throw new Error("DB not available");
+  if (!db) throw new Error("Database not available");
   const result = await db.insert(emailLogs).values(data);
-  return (result[0] as { insertId: number }).insertId;
+  return result[0].insertId;
 }

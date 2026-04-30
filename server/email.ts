@@ -32,7 +32,7 @@ function createTransporter() {
 
 export async function sendEmail(options: SendEmailOptions): Promise<void> {
   const transporter = createTransporter();
-  const fromName = process.env.SMTP_FROM_NAME || "Equilíbrio Consultoria";
+  const fromName = process.env.SMTP_FROM_NAME || "Equilibrium Consultoria";
   const fromEmail = process.env.SMTP_USER || "";
 
   await transporter.sendMail({
@@ -75,7 +75,7 @@ export function buildGuiaEmailHtml(params: {
 <body>
   <div class="container">
     <div class="header">
-      <h1>Equilíbrio Consultoria</h1>
+      <h1>Equilibrium Consultoria</h1>
       <p>Gestão Contábil e Fiscal</p>
     </div>
     <div class="body">
@@ -89,10 +89,10 @@ export function buildGuiaEmailHtml(params: {
       </div>
       <p>Por favor, efetue o pagamento até a data de vencimento para evitar multas e juros.</p>
       <p>Em caso de dúvidas, entre em contato com nosso escritório.</p>
-      <p>Atenciosamente,<br/><strong>Equipe Equilíbrio Consultoria</strong></p>
+      <p>Atenciosamente,<br/><strong>Equipe Equilibrium Consultoria</strong></p>
     </div>
     <div class="footer">
-      <p>Este e-mail foi enviado automaticamente pelo sistema de gestão do escritório Equilíbrio.</p>
+      <p>Este e-mail foi enviado automaticamente pelo sistema de gestão do escritório Equilibrium.</p>
       <p>Contato: <a href="mailto:equilibriumconsultoria.cont@gmail.com">equilibriumconsultoria.cont@gmail.com</a></p>
     </div>
   </div>
@@ -145,7 +145,7 @@ export function buildAlertEmailHtml(params: {
       </table>
       <p style="margin-top:20px;">Acesse o sistema para tomar as ações necessárias.</p>
     </div>
-    <div class="footer"><p>Equilíbrio Consultoria — Sistema de Gestão de Tarefas</p></div>
+    <div class="footer"><p>Equilibrium Consultoria — Sistema de Gestão de Tarefas</p></div>
   </div>
 </body>
 </html>

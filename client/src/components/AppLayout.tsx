@@ -44,7 +44,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "rgba(36,100,108,0.2)" }}>
             <ClipboardList size={28} style={{ color: "#9fd4dc" }} />
           </div>
-          <h1 className="text-xl font-bold mb-1" style={{ color: "#e5e5e5" }}>Equilíbrio</h1>
+          <h1 className="text-xl font-bold mb-1" style={{ color: "#e5e5e5" }}>Equilibrium</h1>
           <p className="text-sm mb-6" style={{ color: "#a1a1aa" }}>Gestão de Tarefas Contábeis</p>
           <a
             href={getLoginUrl()}
@@ -81,7 +81,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               EQ
             </div>
             <div>
-              <p className="font-semibold text-sm leading-tight" style={{ color: "#e5e5e5" }}>Equilíbrio</p>
+              <p className="font-semibold text-sm leading-tight" style={{ color: "#e5e5e5" }}>Equilibrium</p>
               <p className="text-xs" style={{ color: "#a1a1aa" }}>Consultoria</p>
             </div>
           </div>
@@ -142,7 +142,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <button onClick={() => setMobileOpen(true)} style={{ color: "#a1a1aa" }}>
             <Menu size={20} />
           </button>
-          <span className="font-semibold text-sm" style={{ color: "#e5e5e5" }}>Equilíbrio</span>
+          <span className="font-semibold text-sm" style={{ color: "#e5e5e5" }}>Equilibrium</span>
         </header>
 
         <main className="flex-1 overflow-auto p-4 lg:p-6">

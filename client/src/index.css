@@ -43,7 +43,7 @@
 }
 
 :root {
-  /* Equilíbrio — dark teal theme (always dark) */
+  /* Equilibrium — dark teal theme (always dark) */
   --radius: 0.5rem;
   --primary: oklch(0.45 0.09 200);
   --primary-foreground: oklch(0.97 0.005 200);

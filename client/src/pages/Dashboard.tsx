@@ -77,10 +77,10 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Pendentes" value={stats?.pendente ?? 0} icon={Clock} color="#facc15" bg="rgba(234,179,8,0.12)" />
-            <StatCard label="Em Andamento" value={stats?.em_andamento ?? 0} icon={RefreshCw} color="#60a5fa" bg="rgba(59,130,246,0.12)" />
-            <StatCard label="Concluídas" value={stats?.concluida ?? 0} icon={CheckCircle2} color="#4ade80" bg="rgba(34,197,94,0.12)" />
-            <StatCard label="Vencidas" value={stats?.vencida ?? 0} icon={XCircle} color="#f87171" bg="rgba(239,68,68,0.12)" />
+            <StatCard label="Pendentes" value={stats?.pendentes ?? 0} icon={Clock} color="#facc15" bg="rgba(234,179,8,0.12)" />
+            <StatCard label="Em Andamento" value={stats?.emAndamento ?? 0} icon={RefreshCw} color="#60a5fa" bg="rgba(59,130,246,0.12)" />
+            <StatCard label="Concluídas" value={stats?.concluidas ?? 0} icon={CheckCircle2} color="#4ade80" bg="rgba(34,197,94,0.12)" />
+            <StatCard label="Vencidas" value={stats?.vencidas ?? 0} icon={XCircle} color="#f87171" bg="rgba(239,68,68,0.12)" />
           </div>
         )}
 
