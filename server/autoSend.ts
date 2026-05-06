@@ -1,11 +1,11 @@
 import { getDb } from "./db";
 import { tasks, taskFiles, clients, emailLogs } from "../drizzle/schema";
-import { eq, and, isNull, lt, sql } from "drizzle-orm";
+import { eq, and, sql, desc } from "drizzle-orm";
 import { sendEmail } from "./email";
 import { sendGuiaConfirmationWhatsApp } from "./whatsapp";
 
 const EQUILIBRIUM_EMAIL = "contato@equilibriumcont.com";
-const LAST_AUTO_SEND = new Map<number, number>(); // taskId -> timestamp
+const ONE_HOUR_MS = 3_600_000;
 
 /**
  * Enviar automaticamente guias que estão pendentes há mais de 1 hora
@@ -35,12 +35,24 @@ export async function autoSendPendingGuias(): Promise<{
 
     for (const task of pendingTasks) {
       try {
-        // Verificar se já foi enviada automaticamente há menos de 1 hora
-        const lastSend = LAST_AUTO_SEND.get(task.id) || 0;
+        // Verificar via banco se já foi enviado automaticamente há menos de 1 hora
+        // (evita reenvios duplicados mesmo que o servidor tenha reiniciado)
         const now = Date.now();
-        if (now - lastSend < 3600000) {
-          // 1 hora em ms
-          continue;
+        const oneHourAgo = new Date(now - ONE_HOUR_MS);
+        const recentLog = await database
+          .select({ sentAt: emailLogs.sentAt })
+          .from(emailLogs)
+          .where(
+            and(
+              eq(emailLogs.taskId, task.id),
+              sql`${emailLogs.sentAt} >= ${oneHourAgo.toISOString()}`
+            )
+          )
+          .orderBy(desc(emailLogs.sentAt))
+          .limit(1);
+
+        if (recentLog.length > 0) {
+          continue; // Já enviado há menos de 1 hora, pular
         }
 
         // Buscar arquivos da tarefa
@@ -70,6 +82,38 @@ export async function autoSendPendingGuias(): Promise<{
         const file = files[0];
         const clientData = client[0];
 
+        // Buscar o arquivo real do storage via URL presignada
+        let attachmentBuffer: Buffer | undefined;
+        const attachmentFilename = file.filename || "guia.pdf";
+        const attachmentMime = file.mimeType || "application/pdf";
+        try {
+          const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL ?? "";
+          const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY ?? "";
+          if (forgeApiUrl && forgeApiKey && file.fileKey) {
+            const presignResp = await fetch(
+              `${forgeApiUrl.replace(/\/+$/, "")}/v1/storage/presign/get?path=${encodeURIComponent(file.fileKey)}`,
+              { headers: { Authorization: `Bearer ${forgeApiKey}` } }
+            );
+            if (presignResp.ok) {
+              const { url: signedUrl } = (await presignResp.json()) as { url: string };
+              const fileResp = await fetch(signedUrl);
+              if (fileResp.ok) {
+                attachmentBuffer = Buffer.from(await fileResp.arrayBuffer());
+              } else {
+                console.warn(`[AutoSend] File fetch failed for task ${task.id}: HTTP ${fileResp.status}`);
+              }
+            } else {
+              console.warn(`[AutoSend] Presign failed for task ${task.id}: HTTP ${presignResp.status}`);
+            }
+          }
+        } catch (attachErr) {
+          console.warn(`[AutoSend] Could not fetch attachment for task ${task.id}:`, attachErr);
+        }
+
+        const attachments = attachmentBuffer
+          ? [{ filename: attachmentFilename, content: attachmentBuffer, contentType: attachmentMime }]
+          : [];
+
         // Enviar e-mail ao cliente
         await sendEmail({
           to: clientData.email,
@@ -77,14 +121,7 @@ export async function autoSendPendingGuias(): Promise<{
           html: `<p>Prezado(a) ${clientData.name},</p>
 <p>Segue em anexo a guia referente a <strong>${task.title}</strong> da competência <strong>${task.competencia}</strong>.</p>
 <p>Atenciosamente,<br/>Equilibrium Consultoria</p>`,
-          attachments: file.fileUrl
-            ? [
-                {
-                  filename: file.filename || "guia.pdf",
-                  path: file.fileUrl,
-                },
-              ]
-            : [],
+          attachments,
         });
 
         // Enviar cópia para Equilibrium
@@ -98,14 +135,7 @@ export async function autoSendPendingGuias(): Promise<{
 <p><strong>Competência:</strong> ${task.competencia}</p>
 <p><strong>E-mail do cliente:</strong> ${clientData.email}</p>
 <p><strong>Hora do envio:</strong> ${new Date().toLocaleString("pt-BR")}</p>`,
-          attachments: file.fileUrl
-            ? [
-                {
-                  filename: file.filename || "guia.pdf",
-                  path: file.fileUrl,
-                },
-              ]
-            : [],
+          attachments,
         });
 
         // Registrar envio no log
@@ -119,17 +149,22 @@ export async function autoSendPendingGuias(): Promise<{
           status: "ENVIADO",
         } as any);
 
-        // Enviar confirmação por WhatsApp (se houver telefone)
+        // Enviar confirmação por WhatsApp (não bloqueia o fluxo principal)
         if (clientData.phone) {
-          await sendGuiaConfirmationWhatsApp(
-            clientData.phone,
-            task.title,
-            clientData.name
-          );
+          try {
+            const wppResult = await sendGuiaConfirmationWhatsApp(
+              clientData.phone,
+              task.title,
+              clientData.name
+            );
+            if (!wppResult.success) {
+              console.warn(`[AutoSend] WhatsApp não entregue para task ${task.id}:`, wppResult.error);
+            }
+          } catch (wppErr) {
+            console.warn(`[AutoSend] Erro ao enviar WhatsApp para task ${task.id}:`, wppErr);
+          }
         }
 
-        // Atualizar timestamp do último envio
-        LAST_AUTO_SEND.set(task.id, now);
         sent++;
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : "Unknown error";

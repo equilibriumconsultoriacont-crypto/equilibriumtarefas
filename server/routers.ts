@@ -11,6 +11,7 @@ import {
   createTask,
   createTaskFile,
   getDashboardStats,
+  getClientById,
   getTaskById,
   getTaskFileById,
   getTasksDueSoon,
@@ -27,6 +28,7 @@ import {
 } from "./db";
 import { buildAlertEmailHtml, buildGuiaEmailHtml, sendEmail } from "./email";
 import { storagePut } from "./storage";
+import { sendGuiaConfirmationWhatsApp } from "./whatsapp";
 import { getUserByEmail, upsertUser } from "./db";
 import bcryptjs from "bcryptjs";
 
@@ -338,37 +340,56 @@ const emailRouter = router({
         notes: task.notes ?? undefined,
       });
 
-      const attachments: Array<{ filename: string; path?: string; content?: Buffer; contentType: string }> = [];
+      // ── Buscar e anexar o arquivo da guia ───────────────────────────────────
+      const attachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
+      let attachmentWarning: string | undefined;
+
       if (input.taskFileId) {
         const file = await getTaskFileById(input.taskFileId);
         if (file) {
-          // Fetch the file content from storage proxy to attach to email
           try {
             const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL ?? "";
             const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY ?? "";
-            const storageKey = file.fileKey;
-            const presignResp = await fetch(
-              `${forgeApiUrl.replace(/\/+$/, "")}/v1/storage/presign/get?path=${encodeURIComponent(storageKey)}`,
-              { headers: { Authorization: `Bearer ${forgeApiKey}` } }
-            );
-            if (presignResp.ok) {
-              const { url: signedUrl } = (await presignResp.json()) as { url: string };
-              const fileResp = await fetch(signedUrl);
-              if (fileResp.ok) {
-                const arrayBuffer = await fileResp.arrayBuffer();
-                attachments.push({
-                  filename: file.filename,
-                  content: Buffer.from(arrayBuffer),
-                  contentType: file.mimeType || "application/pdf",
-                });
+
+            if (!forgeApiUrl || !forgeApiKey) {
+              attachmentWarning = "Variáveis BUILT_IN_FORGE_API_URL / BUILT_IN_FORGE_API_KEY não configuradas — anexo ignorado.";
+              console.warn("[Email] " + attachmentWarning);
+            } else {
+              const presignResp = await fetch(
+                `${forgeApiUrl.replace(/\/+$/, "")}/v1/storage/presign/get?path=${encodeURIComponent(file.fileKey)}`,
+                { headers: { Authorization: `Bearer ${forgeApiKey}` } }
+              );
+
+              if (!presignResp.ok) {
+                attachmentWarning = `Presign do storage falhou (HTTP ${presignResp.status}) — e-mail enviado sem anexo.`;
+                console.warn("[Email]", attachmentWarning);
+              } else {
+                const { url: signedUrl } = (await presignResp.json()) as { url: string };
+                const fileResp = await fetch(signedUrl);
+
+                if (!fileResp.ok) {
+                  attachmentWarning = `Download do arquivo falhou (HTTP ${fileResp.status}) — e-mail enviado sem anexo.`;
+                  console.warn("[Email]", attachmentWarning);
+                } else {
+                  attachments.push({
+                    filename: file.filename,
+                    content: Buffer.from(await fileResp.arrayBuffer()),
+                    contentType: file.mimeType || "application/pdf",
+                  });
+                }
               }
             }
           } catch (attachErr) {
-            console.warn("[Email] Could not fetch attachment:", attachErr);
+            attachmentWarning = `Erro ao buscar anexo: ${attachErr instanceof Error ? attachErr.message : String(attachErr)} — e-mail enviado sem anexo.`;
+            console.warn("[Email]", attachmentWarning);
           }
+        } else {
+          attachmentWarning = `Arquivo (id=${input.taskFileId}) não encontrado no banco — e-mail enviado sem anexo.`;
+          console.warn("[Email]", attachmentWarning);
         }
       }
 
+      // ── Enviar e-mail ────────────────────────────────────────────────────────
       let status: "ENVIADO" | "FALHOU" = "ENVIADO";
       let errorMessage: string | undefined;
 
@@ -395,7 +416,30 @@ const emailRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: errorMessage });
       }
 
-      return { success: true };
+      // ── Notificação WhatsApp (não bloqueia o retorno) ────────────────────────
+      let whatsappSent = false;
+      try {
+        const clientData = await getClientById(task.clientId);
+        if (clientData?.phone) {
+          const wppResult = await sendGuiaConfirmationWhatsApp(
+            clientData.phone,
+            task.title,
+            input.clientName
+          );
+          whatsappSent = wppResult.success;
+          if (!wppResult.success) {
+            console.warn("[sendGuia] WhatsApp não entregue:", wppResult.error);
+          }
+        }
+      } catch (wppErr) {
+        console.warn("[sendGuia] Erro ao enviar WhatsApp:", wppErr);
+      }
+
+      return {
+        success: true,
+        attachmentWarning,
+        whatsappSent,
+      };
     }),
 
   sendAlerts: protectedProcedure.mutation(async () => {
