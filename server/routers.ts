@@ -275,6 +275,19 @@ const filesRouter = router({
       const buffer = Buffer.from(input.base64, "base64");
       const fileKey = `tasks/${input.taskId}/${Date.now()}-${input.filename}`;
       const { url } = await storagePut(fileKey, buffer, input.mimeType || "application/pdf");
+      
+      // Reconhecer tipo de documento via OCR
+      let documentType = "UNKNOWN";
+      let confidence = 0;
+      try {
+        const { recognizeDocument } = await import("./ocr");
+        const recognition = await recognizeDocument(url, input.mimeType || "application/pdf");
+        documentType = recognition.documentType;
+        confidence = recognition.confidence;
+      } catch (error) {
+        console.warn("[OCR] Error recognizing document:", error);
+      }
+      
       const id = await createTaskFile({
         taskId: input.taskId,
         clientId: input.clientId,
@@ -285,7 +298,14 @@ const filesRouter = router({
         fileSize: input.fileSize,
         uploadedBy: ctx.user?.id,
       });
-      return { id, fileKey, fileUrl: url };
+      
+      return { 
+        id, 
+        fileKey, 
+        fileUrl: url,
+        documentType,
+        confidence
+      };
     }),
 });
 
@@ -447,6 +467,20 @@ const emailRouter = router({
 });
 
 // ─── App Router ───────────────────────────────────────────────────────────────
+
+// ─── Auto-Send Router (para tarefa agendada) ───────────────────────────────────
+const autoSendRouter = router({
+  sendGuias: publicProcedure.mutation(async () => {
+    const { autoSendPendingGuias, sendDueSoonAlerts } = await import("./autoSend");
+    const sendResult = await autoSendPendingGuias();
+    const alertResult = await sendDueSoonAlerts();
+    return {
+      guias: sendResult,
+      alerts: alertResult,
+    };
+  }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -489,6 +523,7 @@ export const appRouter = router({
   tasks: tasksRouter,
   files: filesRouter,
   email: emailRouter,
+  autoSend: autoSendRouter,
 });
 
 export type AppRouter = typeof appRouter;

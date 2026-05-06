@@ -50,3 +50,17 @@
 - [x] Teste: formato de competência e CNPJ
 - [x] Teste: geração de assunto de e-mail
 - [x] Teste: router de logout
+
+## Autenticação
+- [x] Sistema de login com usuário/senha (bcryptjs)
+- [x] Primeiro usuário: equilibriumconsultoria.cont@gmail.com / Equilibrium159753
+- [x] Proteção de rotas (apenas usuários autenticados)
+- [x] SMTP Hostinger configurado (smtp.hostinger.com:465)
+
+## Novas Funcionalidades (Concluídas)
+
+- [x] Reconhecimento de arquivo (OCR simples) - detectar tipo de guia e CNPJ
+- [x] Vinculação automática de documento reconhecido à tarefa
+- [x] Sistema de lembretes por WhatsApp (Twilio) - número 19 999560591
+- [x] Envio automático de guias a cada 1 hora (tarefa agendada)
+- [x] Cópia de e-mail para contato@equilibriumcont.com em todos os envios
