@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ClipboardList,
   CloudUpload,
+  KeyRound,
   LogOut,
   Menu,
   RefreshCw,
@@ -25,6 +26,7 @@ const navItems = [
   { href: "/catalogo", label: "Catálogo", icon: BookOpen },
   { href: "/painel-mensal", label: "Painel Mensal", icon: CalendarDays },
   { href: "/recorrentes", label: "Recorrentes", icon: RefreshCw },
+  { href: "/acessos-clientes", label: "Portal Clientes", icon: KeyRound },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

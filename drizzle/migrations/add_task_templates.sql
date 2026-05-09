@@ -28,3 +28,8 @@ ALTER TABLE `recurring_tasks`
 ALTER TABLE `clients`
   ADD COLUMN IF NOT EXISTS `cpf` varchar(14) DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS `documentType` enum('CNPJ','CPF') NOT NULL DEFAULT 'CNPJ';
+
+-- Migration 3: portal do cliente — role e clientId na tabela users
+ALTER TABLE `users`
+  MODIFY COLUMN `role` enum('user','admin','client') NOT NULL DEFAULT 'user',
+  ADD COLUMN IF NOT EXISTS `clientId` int DEFAULT NULL;

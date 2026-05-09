@@ -36,7 +36,7 @@ import {
 import { buildAlertEmailHtml, buildGuiaEmailHtml, sendEmail } from "./email";
 import { storagePut } from "./storage";
 import { sendGuiaConfirmationWhatsApp } from "./whatsapp";
-import { getUserByEmail, upsertUser } from "./db";
+import { getDb, getUserByEmail, upsertUser } from "./db";
 import bcryptjs from "bcryptjs";
 
 // ─── Clients Router ───────────────────────────────────────────────────────────
@@ -831,6 +831,128 @@ const monthlyPanelRouter = router({
     .query(({ input }) => getMonthlyPanel(input.month, input.year)),
 });
 
+
+// ─── Client Portal Router ─────────────────────────────────────────────────────
+// Interface exclusiva para clientes — acesso somente às próprias guias
+const clientPortalRouter = router({
+  // Dados do calendário: tarefas do cliente logado agrupadas por mês
+  calendar: publicProcedure
+    .input(z.object({ month: z.number().min(1).max(12), year: z.number().min(2020) }))
+    .query(async ({ input, ctx }) => {
+      if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (ctx.user.role !== "client" || !ctx.user.clientId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito a clientes" });
+      }
+      const clientTasks = await listTasks({ clientId: ctx.user.clientId });
+      const competencia = `${String(input.month).padStart(2, "0")}/${input.year}`;
+      const monthTasks = clientTasks.filter((t) => t.competencia === competencia);
+      return monthTasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        taskType: t.taskType,
+        status: t.status,
+        dueDate: t.dueDate,
+        competencia: t.competencia,
+      }));
+    }),
+
+  // Arquivos de uma tarefa específica (somente do cliente logado)
+  taskFiles: publicProcedure
+    .input(z.object({ taskId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (ctx.user.role !== "client" || !ctx.user.clientId) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const task = await getTaskById(input.taskId);
+      if (!task || task.clientId !== ctx.user.clientId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Tarefa não pertence a este cliente" });
+      }
+      return listTaskFiles(input.taskId);
+    }),
+
+  // URL de download de arquivo (presigned)
+  fileDownloadUrl: publicProcedure
+    .input(z.object({ taskId: z.number(), fileId: z.number() }))
+    .query(async ({ input, ctx }) => {
+      if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (ctx.user.role !== "client" || !ctx.user.clientId) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const task = await getTaskById(input.taskId);
+      if (!task || task.clientId !== ctx.user.clientId) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const file = await getTaskFileById(input.fileId);
+      if (!file) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL ?? "";
+      const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY ?? "";
+      if (!forgeApiUrl || !forgeApiKey) {
+        return { url: file.fileUrl };
+      }
+      try {
+        const resp = await fetch(
+          `${forgeApiUrl.replace(/\/+$/, "")}/v1/storage/presign/get?path=${encodeURIComponent(file.fileKey)}`,
+          { headers: { Authorization: `Bearer ${forgeApiKey}` } }
+        );
+        if (resp.ok) {
+          const { url } = await resp.json() as { url: string };
+          return { url };
+        }
+      } catch {}
+      return { url: file.fileUrl };
+    }),
+});
+
+// ─── Client Management Router (admin only) ────────────────────────────────────
+const clientAccessRouter = router({
+  // Criar/redefinir login de acesso para um cliente
+  createLogin: protectedProcedure
+    .input(z.object({
+      clientId: z.number(),
+      email: z.string().email(),
+      password: z.string().min(6),
+    }))
+    .mutation(async ({ input }) => {
+      const passwordHash = await bcryptjs.hash(input.password, 10);
+      const existing = await getUserByEmail(input.email);
+      if (existing) {
+        await upsertUser({
+          email: input.email,
+          passwordHash,
+          role: "client",
+          clientId: input.clientId,
+          lastSignedIn: existing.lastSignedIn,
+        });
+        return { success: true, action: "updated" };
+      }
+      await upsertUser({
+        email: input.email,
+        name: input.email,
+        passwordHash,
+        role: "client",
+        clientId: input.clientId,
+        lastSignedIn: new Date(),
+      });
+      return { success: true, action: "created" };
+    }),
+
+  // Listar acessos de clientes existentes
+  listLogins: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return [];
+    const { users: usersTable } = await import("../drizzle/schema");
+    const { eq } = await import("drizzle-orm");
+    return db.select({
+      id: usersTable.id,
+      email: usersTable.email,
+      clientId: usersTable.clientId,
+      lastSignedIn: usersTable.lastSignedIn,
+    }).from(usersTable).where(eq(usersTable.role, "client"));
+  }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -860,7 +982,7 @@ export const appRouter = router({
           ...cookieOptions,
           maxAge: 1000 * 60 * 60 * 24 * 365,
         });
-        return { success: true, user };
+        return { success: true, user, role: user.role, clientId: (user as any).clientId };
       }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
@@ -878,6 +1000,8 @@ export const appRouter = router({
   clientTemplates: clientTemplatesRouter,
   monthlyPanel: monthlyPanelRouter,
   smartUpload: smartUploadRouter,
+  clientPortal: clientPortalRouter,
+  clientAccess: clientAccessRouter,
 });
 
 export type AppRouter = typeof appRouter;
