@@ -55,7 +55,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <h1 className="text-xl font-bold mb-1" style={{ color: "#e5e5e5" }}>Equilibrium</h1>
           <p className="text-sm mb-6" style={{ color: "#a1a1aa" }}>Gestão de Tarefas Contábeis</p>
           <a
-            href={getLoginUrl()}
+            href="/"
             className="block w-full py-2.5 px-4 rounded-lg text-sm font-medium text-center transition-opacity hover:opacity-90"
             style={{ background: "#24646c", color: "#fff" }}
           >
