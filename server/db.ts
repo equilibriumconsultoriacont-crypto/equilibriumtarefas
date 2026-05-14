@@ -1,25 +1,31 @@
-import { eq, desc } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  CatalogTemplate,
   Client,
   ClientTaskTemplate,
   EmailLog,
+  InsertCatalogTemplate,
   InsertClient,
   InsertClientTaskTemplate,
   InsertEmailLog,
   InsertRecurringTask,
   InsertTask,
+  InsertTaskCatalog,
   InsertTaskFile,
   InsertTaskTemplate,
   InsertUser,
   RecurringTask,
   Task,
+  TaskCatalog,
   TaskFile,
   TaskTemplate,
+  catalogTemplates,
   clientTaskTemplates,
   clients,
   emailLogs,
   recurringTasks,
+  taskCatalogs,
   taskFiles,
   taskTemplates,
   tasks,
@@ -226,7 +232,7 @@ export async function taskExistsByRecurringAndCompetencia(
   const result = await db
     .select()
     .from(tasks)
-    .where(eq(tasks.recurringTaskId, recurringTaskId) && eq(tasks.competencia, competencia))
+    .where(and(eq(tasks.recurringTaskId, recurringTaskId), eq(tasks.competencia, competencia)))
     .limit(1);
   return result.length > 0;
 }
@@ -371,7 +377,7 @@ export async function getUserByResetToken(token: string): Promise<User | undefin
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select().from(users)
-    .where(sql`${users.openId} LIKE ${`reset:${token}:%`}`)
+    .where(sql`${users.openId} LIKE ${'reset:' + token + ':%'}`)
     .limit(1);
   if (!result[0]) return undefined;
   // Verificar se não expirou
@@ -401,15 +407,6 @@ export async function deleteTaskFile(fileId: number): Promise<TaskFile | undefin
 }
 
 // ─── Task Catalogs ────────────────────────────────────────────────────────────
-import {
-  TaskCatalog,
-  InsertTaskCatalog,
-  CatalogTemplate,
-  InsertCatalogTemplate,
-  taskCatalogs,
-  catalogTemplates,
-} from "../drizzle/schema";
-
 export async function listTaskCatalogs(activeOnly = true): Promise<TaskCatalog[]> {
   const db = await getDb();
   if (!db) return [];
