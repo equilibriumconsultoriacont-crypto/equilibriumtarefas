@@ -399,3 +399,87 @@ export async function deleteTaskFile(fileId: number): Promise<TaskFile | undefin
   await db.delete(taskFiles).where(eq(taskFiles.id, fileId));
   return result[0];
 }
+
+// ─── Task Catalogs ────────────────────────────────────────────────────────────
+import {
+  TaskCatalog,
+  InsertTaskCatalog,
+  CatalogTemplate,
+  InsertCatalogTemplate,
+  taskCatalogs,
+  catalogTemplates,
+} from "../drizzle/schema";
+
+export async function listTaskCatalogs(activeOnly = true): Promise<TaskCatalog[]> {
+  const db = await getDb();
+  if (!db) return [];
+  if (activeOnly) return db.select().from(taskCatalogs).where(eq(taskCatalogs.active, true)).orderBy(taskCatalogs.name);
+  return db.select().from(taskCatalogs).orderBy(taskCatalogs.name);
+}
+
+export async function createTaskCatalog(data: InsertTaskCatalog): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(taskCatalogs).values(data);
+  return result[0].insertId;
+}
+
+export async function updateTaskCatalog(id: number, data: Partial<InsertTaskCatalog>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(taskCatalogs).set(data).where(eq(taskCatalogs.id, id));
+}
+
+export async function getCatalogTemplates(catalogId: number): Promise<CatalogTemplate[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(catalogTemplates).where(eq(catalogTemplates.catalogId, catalogId));
+}
+
+export async function addCatalogTemplate(data: InsertCatalogTemplate): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(catalogTemplates).values(data);
+}
+
+export async function removeCatalogTemplate(catalogId: number, taskTemplateId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(catalogTemplates).where(
+    and(eq(catalogTemplates.catalogId, catalogId), eq(catalogTemplates.taskTemplateId, taskTemplateId))
+  );
+}
+
+// Aplica catálogo ao cliente — adiciona todas as tarefas do catálogo de uma vez
+export async function applyCatalogToClient(clientId: number, catalogId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const items = await getCatalogTemplates(catalogId);
+  const existing = await listClientTaskTemplates(clientId);
+  const existingIds = new Set(existing.map((e) => e.taskTemplateId));
+  let added = 0;
+  for (const item of items) {
+    if (existingIds.has(item.taskTemplateId)) continue;
+    await db.insert(clientTaskTemplates).values({
+      clientId,
+      taskTemplateId: item.taskTemplateId,
+      catalogId,
+      active: true,
+    });
+    // Buscar template para criar recurringTask
+    const tmpl = await getTaskTemplateById(item.taskTemplateId);
+    if (tmpl) {
+      await createRecurringTask({
+        clientId,
+        taskTemplateId: item.taskTemplateId,
+        title: tmpl.title,
+        description: tmpl.description ?? undefined,
+        taskType: tmpl.taskType,
+        dueDayOfMonth: tmpl.dueDayOfMonth,
+        active: true,
+      });
+    }
+    added++;
+  }
+  return added;
+}

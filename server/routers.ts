@@ -6,6 +6,13 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   addClientTaskTemplate,
+  applyCatalogToClient,
+  createTaskCatalog,
+  getCatalogTemplates,
+  addCatalogTemplate,
+  removeCatalogTemplate,
+  listTaskCatalogs,
+  updateTaskCatalog,
   createClient,
   createEmailLog,
   createRecurringTask,
@@ -764,6 +771,62 @@ const smartUploadRouter = router({
     }),
 });
 
+
+// ─── Task Catalogs Router ─────────────────────────────────────────────────────
+const taskCatalogsRouter = router({
+  list: protectedProcedure
+    .input(z.object({ activeOnly: z.boolean().default(true) }))
+    .query(({ input }) => listTaskCatalogs(input.activeOnly)),
+
+  create: protectedProcedure
+    .input(z.object({
+      name: z.string().min(2),
+      description: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const id = await createTaskCatalog({ ...input, active: true });
+      return { id };
+    }),
+
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      active: z.boolean().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { id, ...data } = input;
+      await updateTaskCatalog(id, data);
+      return { success: true };
+    }),
+
+  getTemplates: protectedProcedure
+    .input(z.object({ catalogId: z.number() }))
+    .query(({ input }) => getCatalogTemplates(input.catalogId)),
+
+  addTemplate: protectedProcedure
+    .input(z.object({ catalogId: z.number(), taskTemplateId: z.number() }))
+    .mutation(async ({ input }) => {
+      await addCatalogTemplate(input);
+      return { success: true };
+    }),
+
+  removeTemplate: protectedProcedure
+    .input(z.object({ catalogId: z.number(), taskTemplateId: z.number() }))
+    .mutation(async ({ input }) => {
+      await removeCatalogTemplate(input.catalogId, input.taskTemplateId);
+      return { success: true };
+    }),
+
+  applyToClient: protectedProcedure
+    .input(z.object({ clientId: z.number(), catalogId: z.number() }))
+    .mutation(async ({ input }) => {
+      const added = await applyCatalogToClient(input.clientId, input.catalogId);
+      return { success: true, added };
+    }),
+});
+
 // ─── Task Templates Router ────────────────────────────────────────────────────
 const taskTemplatesRouter = router({
   list: protectedProcedure
@@ -1046,6 +1109,7 @@ export const appRouter = router({
   email: emailRouter,
   autoSend: autoSendRouter,
   taskTemplates: taskTemplatesRouter,
+  taskCatalogs: taskCatalogsRouter,
   clientTemplates: clientTemplatesRouter,
   monthlyPanel: monthlyPanelRouter,
   smartUpload: smartUploadRouter,

@@ -14,6 +14,7 @@ import MonthlyPanelPage from "./pages/MonthlyPanel";
 import SmartUploadPage from "./pages/SmartUpload";
 import ClientDetail from "./pages/ClientDetail";
 import ClientLoginsPage from "./pages/ClientLogins";
+import TaskCatalogsPage from "./pages/TaskCatalogs";
 
 function Router() {
   return (
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/tarefas/:id" component={TaskDetail} />
       <Route path="/recorrentes" component={RecurringTasksPage} />
       <Route path="/catalogo" component={TaskTemplatesPage} />
+      <Route path="/catalogos" component={TaskCatalogsPage} />
       <Route path="/painel-mensal" component={MonthlyPanelPage} />
       <Route path="/upload-inteligente" component={SmartUploadPage} />
       <Route path="/acessos-clientes" component={ClientLoginsPage} />

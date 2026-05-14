@@ -3,7 +3,7 @@ import { StatusBadge, TaskTypeBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, BookOpen, Building2, Mail, Phone, PlusCircle, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Building2, Mail, Package, Phone, PlusCircle, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Link, useParams } from "wouter";
@@ -21,6 +21,21 @@ export default function ClientDetail() {
   const { data: allTemplates = [] } = trpc.taskTemplates.list.useQuery({ activeOnly: true });
 
   const addTemplateMutation = trpc.clientTemplates.add.useMutation();
+  const applyCatalogMutation = trpc.taskCatalogs.applyToClient.useMutation();
+  const { data: catalogs = [] } = trpc.taskCatalogs.list.useQuery({ activeOnly: true });
+  const [applyCatalogOpen, setApplyCatalogOpen] = useState(false);
+
+  const handleApplyCatalog = async (catalogId: number) => {
+    try {
+      const result = await applyCatalogMutation.mutateAsync({ clientId, catalogId });
+      toast.success(`${result.added} tarefa(s) adicionada(s) do catálogo!`);
+      utils.clientTemplates.listByClient.invalidate();
+      utils.recurringTasks.list.invalidate();
+      setApplyCatalogOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message ?? "Erro ao aplicar catálogo");
+    }
+  };
   const removeTemplateMutation = trpc.clientTemplates.remove.useMutation();
   const utils = trpc.useUtils();
 
@@ -136,15 +151,26 @@ export default function ClientDetail() {
                 Obrigações do Cliente ({clientTemplates.length})
               </span>
             </div>
-            {availableTemplates.length > 0 && (
-              <Button
-                onClick={() => setAddTemplateOpen(true)}
-                className="gap-1.5 text-xs h-7 px-3"
-                style={{ background: "rgba(36,100,108,0.2)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.3)" }}
-              >
-                <PlusCircle size={12} /> Adicionar
-              </Button>
-            )}
+            <div className="flex gap-2">
+              {catalogs.length > 0 && (
+                <Button
+                  onClick={() => setApplyCatalogOpen(true)}
+                  className="gap-1.5 text-xs h-7 px-3"
+                  style={{ background: "rgba(36,100,108,0.1)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.2)" }}
+                >
+                  <Package size={12} /> Aplicar Catálogo
+                </Button>
+              )}
+              {availableTemplates.length > 0 && (
+                <Button
+                  onClick={() => setAddTemplateOpen(true)}
+                  className="gap-1.5 text-xs h-7 px-3"
+                  style={{ background: "rgba(36,100,108,0.2)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.3)" }}
+                >
+                  <PlusCircle size={12} /> Adicionar
+                </Button>
+              )}
+            </div>
           </div>
           {clientTemplates.length === 0 ? (
             <div className="text-center py-8">
@@ -308,6 +334,35 @@ export default function ClientDetail() {
           </div>
         )}
       </div>
+
+      {/* Apply Catalog Dialog */}
+      <Dialog open={applyCatalogOpen} onOpenChange={setApplyCatalogOpen}>
+        <DialogContent style={{ background: "#111", borderColor: "#1e4f5c", color: "#e5e5e5" }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: "#e5e5e5" }}>Aplicar Catálogo ao Cliente</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs mt-1 mb-3" style={{ color: "#a1a1aa" }}>
+            Todas as tarefas do catálogo selecionado serão adicionadas ao cliente de uma vez.
+          </p>
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {catalogs.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => handleApplyCatalog(cat.id)}
+                disabled={applyCatalogMutation.isPending}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-lg text-left hover:bg-white/5 transition-colors"
+                style={{ border: "1px solid rgba(30,79,92,0.5)" }}
+              >
+                <div>
+                  <p className="text-sm font-medium" style={{ color: "#e5e5e5" }}>{cat.name}</p>
+                  {cat.description && <p className="text-xs" style={{ color: "#52525b" }}>{cat.description}</p>}
+                </div>
+                <Package size={14} style={{ color: "#9fd4dc" }} />
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Template Dialog */}
       <Dialog open={addTemplateOpen} onOpenChange={setAddTemplateOpen}>

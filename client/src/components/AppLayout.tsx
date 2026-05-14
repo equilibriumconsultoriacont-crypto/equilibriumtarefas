@@ -1,6 +1,7 @@
 import {
   BarChart3,
   BookOpen,
+  Package,
   Building2,
   CalendarDays,
   CheckSquare,
@@ -19,7 +20,8 @@ const navItems = [
   { href: "/clientes", label: "Clientes", icon: Building2 },
   { href: "/tarefas", label: "Tarefas", icon: CheckSquare },
   { href: "/upload-inteligente", label: "Upload Guias", icon: CloudUpload },
-  { href: "/catalogo", label: "Catálogo", icon: BookOpen },
+  { href: "/catalogos", label: "Catálogos", icon: Package },
+  { href: "/catalogo", label: "Tarefas Base", icon: BookOpen },
   { href: "/painel-mensal", label: "Painel Mensal", icon: CalendarDays },
   { href: "/recorrentes", label: "Recorrentes", icon: RefreshCw },
   { href: "/acessos-clientes", label: "Portal Clientes", icon: KeyRound },

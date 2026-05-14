@@ -45,6 +45,31 @@ export type Client = typeof clients.$inferSelect;
 export type InsertClient = typeof clients.$inferInsert;
 
 
+
+// ─── Task Catalogs (pacotes de tarefas) ──────────────────────────────────────
+export const taskCatalogs = mysqlTable("task_catalogs", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(), // ex: "Simples Nacional"
+  description: text("description"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type TaskCatalog = typeof taskCatalogs.$inferSelect;
+export type InsertTaskCatalog = typeof taskCatalogs.$inferInsert;
+
+// ─── Catalog Templates (quais tarefas cada catálogo inclui) ──────────────────
+export const catalogTemplates = mysqlTable("catalog_templates", {
+  id: int("id").autoincrement().primaryKey(),
+  catalogId: int("catalogId").notNull(),
+  taskTemplateId: int("taskTemplateId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type CatalogTemplate = typeof catalogTemplates.$inferSelect;
+export type InsertCatalogTemplate = typeof catalogTemplates.$inferInsert;
+
 // ─── Task Templates (catálogo global de tarefas, sem cliente) ────────────────
 export const taskTemplates = mysqlTable("task_templates", {
   id: int("id").autoincrement().primaryKey(),
@@ -66,6 +91,7 @@ export const clientTaskTemplates = mysqlTable("client_task_templates", {
   id: int("id").autoincrement().primaryKey(),
   clientId: int("clientId").notNull(),
   taskTemplateId: int("taskTemplateId").notNull(),
+  catalogId: int("catalogId"), // catálogo de origem (null = adicionado manualmente)
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
