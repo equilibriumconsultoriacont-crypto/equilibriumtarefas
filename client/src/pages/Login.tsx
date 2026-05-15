@@ -10,7 +10,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const loginMutation = (trpc.auth as any).login.useMutation();
+  const loginMutation = trpc.auth.login.useMutation();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
