@@ -46,7 +46,7 @@ import {
   updateTaskTemplate,
 } from "./db";
 import { buildAlertEmailHtml, buildGuiaEmailHtml, sendEmail } from "./email";
-import { storagePut, storageDelete } from "./storage";
+import { storagePut, storageDelete, storageGetBuffer } from "./storage";
 import { sendGuiaConfirmationWhatsApp } from "./whatsapp";
 import { getDb, getUserByEmail, upsertUser } from "./db";
 import bcryptjs from "bcryptjs";
@@ -385,43 +385,23 @@ const emailRouter = router({
         const file = await getTaskFileById(input.taskFileId);
         if (file) {
           try {
-            const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL ?? "";
-            const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY ?? "";
-
-            if (!forgeApiUrl || !forgeApiKey) {
-              attachmentWarning = "Variáveis BUILT_IN_FORGE_API_URL / BUILT_IN_FORGE_API_KEY não configuradas — anexo ignorado.";
-              console.warn("[Email] " + attachmentWarning);
+            const buf = await storageGetBuffer(file.fileKey, file.fileUrl);
+            if (buf) {
+              attachments.push({
+                filename: file.filename,
+                content: buf,
+                contentType: file.mimeType || "application/pdf",
+              });
             } else {
-              const presignResp = await fetch(
-                `${forgeApiUrl.replace(/\/+$/, "")}/v1/storage/presign/get?path=${encodeURIComponent(file.fileKey)}`,
-                { headers: { Authorization: `Bearer ${forgeApiKey}` } }
-              );
-
-              if (!presignResp.ok) {
-                attachmentWarning = `Presign do storage falhou (HTTP ${presignResp.status}) — e-mail enviado sem anexo.`;
-                console.warn("[Email]", attachmentWarning);
-              } else {
-                const { url: signedUrl } = (await presignResp.json()) as { url: string };
-                const fileResp = await fetch(signedUrl);
-
-                if (!fileResp.ok) {
-                  attachmentWarning = `Download do arquivo falhou (HTTP ${fileResp.status}) — e-mail enviado sem anexo.`;
-                  console.warn("[Email]", attachmentWarning);
-                } else {
-                  attachments.push({
-                    filename: file.filename,
-                    content: Buffer.from(await fileResp.arrayBuffer()),
-                    contentType: file.mimeType || "application/pdf",
-                  });
-                }
-              }
+              attachmentWarning = "Não foi possível carregar o arquivo — e-mail enviado sem anexo.";
+              console.warn("[Email]", attachmentWarning);
             }
           } catch (attachErr) {
-            attachmentWarning = `Erro ao buscar anexo: ${attachErr instanceof Error ? attachErr.message : String(attachErr)} — e-mail enviado sem anexo.`;
+            attachmentWarning = `Erro ao buscar anexo: ${attachErr instanceof Error ? attachErr.message : String(attachErr)}`;
             console.warn("[Email]", attachmentWarning);
           }
         } else {
-          attachmentWarning = `Arquivo (id=${input.taskFileId}) não encontrado no banco — e-mail enviado sem anexo.`;
+          attachmentWarning = `Arquivo (id=${input.taskFileId}) não encontrado.`;
           console.warn("[Email]", attachmentWarning);
         }
       }
@@ -692,26 +672,18 @@ const smartUploadRouter = router({
         });
 
         // Buscar buffer para anexo via presigned URL
-        const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL ?? "";
-        const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY ?? "";
         const attachments: any[] = [];
-
-        if (forgeApiUrl && forgeApiKey) {
-          const presignResp = await fetch(
-            `${forgeApiUrl.replace(/\/+$/, "")}/v1/storage/presign/get?path=${encodeURIComponent(finalFileKey)}`,
-            { headers: { Authorization: `Bearer ${forgeApiKey}` } }
-          );
-          if (presignResp.ok) {
-            const { url: signedUrl } = await presignResp.json() as { url: string };
-            const fileResp = await fetch(signedUrl);
-            if (fileResp.ok) {
-              attachments.push({
-                filename: input.filename,
-                content: Buffer.from(await fileResp.arrayBuffer()),
-                contentType: input.mimeType || "application/pdf",
-              });
-            }
+        try {
+          const buf = await storageGetBuffer(finalFileKey, finalUrl);
+          if (buf) {
+            attachments.push({
+              filename: input.filename,
+              content: buf,
+              contentType: input.mimeType || "application/pdf",
+            });
           }
+        } catch (e) {
+          console.warn("[SmartUpload] Could not load attachment:", e);
         }
 
         await sendEmail({ to: matchedClient.email, subject, html, attachments });

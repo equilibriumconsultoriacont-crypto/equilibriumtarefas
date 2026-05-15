@@ -2,33 +2,83 @@ import AppLayout from "@/components/AppLayout";
 import { StatusBadge, TaskTypeBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, BookOpen, Building2, Mail, Package, Phone, PlusCircle, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, BookOpen, Building2, Mail, Package, Phone, PlusCircle, RefreshCw, Send, Trash2, Upload } from "lucide-react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Link, useParams } from "wouter";
 
 export default function ClientDetail() {
   const params = useParams<{ id: string }>();
   const clientId = Number(params.id);
+
   const [addTemplateOpen, setAddTemplateOpen] = useState(false);
+  const [applyCatalogOpen, setApplyCatalogOpen] = useState(false);
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [selectedFileId, setSelectedFileId] = useState<number | undefined>();
+  const [emailForm, setEmailForm] = useState({ to: "", subject: "" });
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: clients = [] } = trpc.clients.list.useQuery({ includeInactive: true });
   const { data: tasks = [], isLoading } = trpc.tasks.list.useQuery({ clientId });
   const { data: emailLogs = [] } = trpc.email.logs.useQuery({ clientId });
   const { data: recurring = [] } = trpc.recurringTasks.list.useQuery({ clientId });
-  const { data: clientTemplates = [] } = trpc.clientTemplates.listByClient.useQuery({ clientId });
+  const { data: clientTemplates = [], refetch: refetchTemplates } = trpc.clientTemplates.listByClient.useQuery({ clientId });
   const { data: allTemplates = [] } = trpc.taskTemplates.list.useQuery({ activeOnly: true });
+  const { data: catalogs = [] } = trpc.taskCatalogs.list.useQuery({ activeOnly: true });
+
+  // Files for selected task (email dialog)
+  const { data: taskFiles = [] } = trpc.files.listByTask.useQuery(
+    { taskId: selectedTaskId! },
+    { enabled: !!selectedTaskId }
+  );
 
   const addTemplateMutation = trpc.clientTemplates.add.useMutation();
+  const removeTemplateMutation = trpc.clientTemplates.remove.useMutation();
   const applyCatalogMutation = trpc.taskCatalogs.applyToClient.useMutation();
-  const { data: catalogs = [] } = trpc.taskCatalogs.list.useQuery({ activeOnly: true });
-  const [applyCatalogOpen, setApplyCatalogOpen] = useState(false);
+  const sendEmailMutation = trpc.email.sendGuia.useMutation();
+  const uploadMutation = trpc.files.upload.useMutation();
+  const utils = trpc.useUtils();
+
+  const client = clients.find((c) => c.id === clientId);
+  const templateMap = new Map(allTemplates.map((t) => [t.id, t]));
+  const assignedTemplateIds = new Set(clientTemplates.map((ct) => ct.taskTemplateId));
+  const availableTemplates = allTemplates.filter((t) => !assignedTemplateIds.has(t.id));
+
+  const handleAddTemplate = async (templateId: number) => {
+    try {
+      await addTemplateMutation.mutateAsync({ clientId, taskTemplateId: templateId });
+      toast.success("Obrigação adicionada!");
+      utils.clientTemplates.listByClient.invalidate();
+      utils.recurringTasks.list.invalidate();
+      setAddTemplateOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message ?? "Erro ao adicionar");
+    }
+  };
+
+  const handleRemoveTemplate = async (id: number) => {
+    if (!confirm("Remover esta obrigação do cliente?")) return;
+    try {
+      await removeTemplateMutation.mutateAsync({ id });
+      toast.success("Obrigação removida");
+      utils.clientTemplates.listByClient.invalidate();
+      utils.recurringTasks.list.invalidate();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Erro ao remover");
+    }
+  };
 
   const handleApplyCatalog = async (catalogId: number) => {
     try {
       const result = await applyCatalogMutation.mutateAsync({ clientId, catalogId });
-      toast.success(`${result.added} tarefa(s) adicionada(s) do catálogo!`);
+      toast.success(`${result.added} obrigação(ões) adicionada(s) do catálogo!`);
       utils.clientTemplates.listByClient.invalidate();
       utils.recurringTasks.list.invalidate();
       setApplyCatalogOpen(false);
@@ -36,35 +86,66 @@ export default function ClientDetail() {
       toast.error(err?.message ?? "Erro ao aplicar catálogo");
     }
   };
-  const removeTemplateMutation = trpc.clientTemplates.remove.useMutation();
-  const utils = trpc.useUtils();
 
-  const client = clients.find((c) => c.id === clientId);
-  const assignedTemplateIds = new Set(clientTemplates.map((ct) => ct.taskTemplateId));
-  const availableTemplates = allTemplates.filter((t) => !assignedTemplateIds.has(t.id));
-  const templateMap = new Map(allTemplates.map((t) => [t.id, t]));
+  const openEmailDialog = (taskId: number) => {
+    setSelectedTaskId(taskId);
+    setSelectedFileId(undefined);
+    setEmailForm({ to: client?.email ?? "", subject: "" });
+    setEmailDialogOpen(true);
+  };
 
-  const handleAddTemplate = async (templateId: number) => {
+  const handleSendEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTaskId || !client) return;
+    const task = tasks.find((t) => t.id === selectedTaskId);
     try {
-      await addTemplateMutation.mutateAsync({ clientId, taskTemplateId: templateId });
-      toast.success("Tarefa adicionada ao cliente!");
-      utils.clientTemplates.listByClient.invalidate();
-      utils.recurringTasks.list.invalidate();
-      setAddTemplateOpen(false);
+      const result = await sendEmailMutation.mutateAsync({
+        taskId: selectedTaskId,
+        taskFileId: selectedFileId,
+        recipientEmail: emailForm.to || client.email,
+        clientName: client.name,
+        subject: emailForm.subject || undefined,
+      });
+      if ((result as any).attachmentWarning) {
+        toast.warning(`E-mail enviado, mas sem anexo: ${(result as any).attachmentWarning}`);
+      } else {
+        toast.success("E-mail enviado com sucesso!");
+      }
+      setEmailDialogOpen(false);
+      utils.email.logs.invalidate({ clientId });
     } catch (err: any) {
-      toast.error(err?.message ?? "Erro ao adicionar tarefa");
+      toast.error(err?.message ?? "Erro ao enviar e-mail");
     }
   };
 
-  const handleRemoveTemplate = async (id: number) => {
-    try {
-      await removeTemplateMutation.mutateAsync({ id });
-      toast.success("Tarefa removida do cliente");
-      utils.clientTemplates.listByClient.invalidate();
-      utils.recurringTasks.list.invalidate();
-    } catch (err: any) {
-      toast.error(err?.message ?? "Erro ao remover");
-    }
+  const openUploadDialog = (taskId: number) => {
+    setSelectedTaskId(taskId);
+    setSelectedFile(null);
+    setUploadDialogOpen(true);
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile || !selectedTaskId) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(",")[1];
+      try {
+        await uploadMutation.mutateAsync({
+          taskId: selectedTaskId,
+          clientId,
+          filename: selectedFile.name,
+          mimeType: selectedFile.type,
+          fileSize: selectedFile.size,
+          base64: base64!,
+        });
+        toast.success("Arquivo enviado!");
+        setUploadDialogOpen(false);
+        setSelectedFile(null);
+      } catch (err: any) {
+        toast.error(err?.message ?? "Erro ao fazer upload");
+      }
+    };
+    reader.readAsDataURL(selectedFile);
   };
 
   if (!client) {
@@ -101,16 +182,12 @@ export default function ClientDetail() {
         <div className="rounded-xl p-5 border" style={{ background: "#111", borderColor: "#1e4f5c" }}>
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span
-                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                  style={client.active
-                    ? { background: "rgba(34,197,94,0.12)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.3)" }
-                    : { background: "rgba(82,82,91,0.2)", color: "#a1a1aa", border: "1px solid rgba(82,82,91,0.4)" }}
-                >
-                  {client.active ? "Ativo" : "Inativo"}
-                </span>
-              </div>
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mb-2"
+                style={client.active
+                  ? { background: "rgba(34,197,94,0.12)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.3)" }
+                  : { background: "rgba(82,82,91,0.2)", color: "#a1a1aa", border: "1px solid rgba(82,82,91,0.4)" }}>
+                {client.active ? "Ativo" : "Inativo"}
+              </span>
               <h1 className="text-lg font-bold" style={{ color: "#e5e5e5" }}>{client.name}</h1>
               <p className="text-sm font-mono mt-1" style={{ color: "#a1a1aa" }}>{client.cnpj}</p>
             </div>
@@ -142,31 +219,25 @@ export default function ClientDetail() {
           </div>
         </div>
 
-        {/* Obrigações do Cliente */}
+        {/* Obrigações */}
         <div className="rounded-xl border" style={{ background: "#111", borderColor: "#1e4f5c" }}>
           <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid #1e4f5c" }}>
             <div className="flex items-center gap-2">
               <BookOpen size={15} style={{ color: "#9fd4dc" }} />
               <span className="text-sm font-medium" style={{ color: "#e5e5e5" }}>
-                Obrigações do Cliente ({clientTemplates.length})
+                Obrigações ({clientTemplates.length})
               </span>
             </div>
             <div className="flex gap-2">
               {catalogs.length > 0 && (
-                <Button
-                  onClick={() => setApplyCatalogOpen(true)}
-                  className="gap-1.5 text-xs h-7 px-3"
-                  style={{ background: "rgba(36,100,108,0.1)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.2)" }}
-                >
+                <Button onClick={() => setApplyCatalogOpen(true)} className="gap-1.5 text-xs h-7 px-3"
+                  style={{ background: "rgba(36,100,108,0.1)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.2)" }}>
                   <Package size={12} /> Aplicar Catálogo
                 </Button>
               )}
               {availableTemplates.length > 0 && (
-                <Button
-                  onClick={() => setAddTemplateOpen(true)}
-                  className="gap-1.5 text-xs h-7 px-3"
-                  style={{ background: "rgba(36,100,108,0.2)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.3)" }}
-                >
+                <Button onClick={() => setAddTemplateOpen(true)} className="gap-1.5 text-xs h-7 px-3"
+                  style={{ background: "rgba(36,100,108,0.2)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.3)" }}>
                   <PlusCircle size={12} /> Adicionar
                 </Button>
               )}
@@ -175,18 +246,21 @@ export default function ClientDetail() {
           {clientTemplates.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-sm" style={{ color: "#a1a1aa" }}>Nenhuma obrigação vinculada</p>
-              <p className="text-xs mt-1 mb-3" style={{ color: "#52525b" }}>
-                Adicione as tarefas que este cliente possui
-              </p>
-              {availableTemplates.length > 0 && (
-                <Button
-                  onClick={() => setAddTemplateOpen(true)}
-                  className="gap-2 text-xs"
-                  style={{ background: "#24646c", color: "#fff" }}
-                >
-                  <PlusCircle size={12} /> Adicionar obrigação
-                </Button>
-              )}
+              <p className="text-xs mt-1 mb-3" style={{ color: "#52525b" }}>Aplique um catálogo ou adicione individualmente</p>
+              <div className="flex justify-center gap-2">
+                {catalogs.length > 0 && (
+                  <Button onClick={() => setApplyCatalogOpen(true)} className="gap-2 text-xs"
+                    style={{ background: "rgba(36,100,108,0.2)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.3)" }}>
+                    <Package size={12} /> Aplicar Catálogo
+                  </Button>
+                )}
+                {availableTemplates.length > 0 && (
+                  <Button onClick={() => setAddTemplateOpen(true)} className="gap-2 text-xs"
+                    style={{ background: "#24646c", color: "#fff" }}>
+                    <PlusCircle size={12} /> Adicionar
+                  </Button>
+                )}
+              </div>
             </div>
           ) : (
             <div className="divide-y" style={{ borderColor: "rgba(30,79,92,0.3)" }}>
@@ -197,28 +271,14 @@ export default function ClientDetail() {
                     <div className="flex items-center gap-3">
                       {tmpl && <TaskTypeBadge type={tmpl.taskType} />}
                       <div>
-                        <p className="text-sm" style={{ color: "#e5e5e5" }}>{tmpl?.title ?? `Template #${ct.taskTemplateId}`}</p>
+                        <p className="text-sm" style={{ color: "#e5e5e5" }}>{tmpl?.title ?? `Obrigação #${ct.taskTemplateId}`}</p>
                         {tmpl && <p className="text-xs mt-0.5" style={{ color: "#52525b" }}>Vence dia {tmpl.dueDayOfMonth}</p>}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-xs px-2 py-0.5 rounded"
-                        style={ct.active
-                          ? { background: "rgba(34,197,94,0.12)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.3)" }
-                          : { background: "rgba(82,82,91,0.2)", color: "#a1a1aa", border: "1px solid rgba(82,82,91,0.4)" }}
-                      >
-                        {ct.active ? "Ativa" : "Inativa"}
-                      </span>
-                      <button
-                        onClick={() => handleRemoveTemplate(ct.id)}
-                        className="p-1.5 rounded hover:bg-white/5 transition-colors"
-                        style={{ color: "#f87171" }}
-                        title="Remover"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+                    <button onClick={() => handleRemoveTemplate(ct.id)}
+                      className="p-1.5 rounded hover:bg-white/5 transition-colors" style={{ color: "#f87171" }} title="Remover">
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 );
               })}
@@ -226,41 +286,10 @@ export default function ClientDetail() {
           )}
         </div>
 
-        {/* Recorrentes geradas */}
-        {recurring.length > 0 && (
-          <div className="rounded-xl border" style={{ background: "#111", borderColor: "#1e4f5c" }}>
-            <div className="flex items-center gap-2 px-5 py-4" style={{ borderBottom: "1px solid #1e4f5c" }}>
-              <RefreshCw size={15} style={{ color: "#9fd4dc" }} />
-              <span className="text-sm font-medium" style={{ color: "#e5e5e5" }}>Recorrentes Geradas ({recurring.length})</span>
-            </div>
-            <div className="divide-y" style={{ borderColor: "rgba(30,79,92,0.4)" }}>
-              {recurring.map((rt) => (
-                <div key={rt.id} className="flex items-center justify-between px-5 py-3">
-                  <div className="flex items-center gap-2">
-                    <TaskTypeBadge type={rt.taskType} />
-                    <span className="text-sm" style={{ color: "#e5e5e5" }}>{rt.title}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs" style={{ color: "#a1a1aa" }}>Vence dia {rt.dueDayOfMonth}</span>
-                    <span
-                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                      style={rt.active
-                        ? { background: "rgba(34,197,94,0.12)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.3)" }
-                        : { background: "rgba(82,82,91,0.2)", color: "#a1a1aa", border: "1px solid rgba(82,82,91,0.4)" }}
-                    >
-                      {rt.active ? "Ativa" : "Inativa"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Histórico de Tarefas */}
+        {/* Tarefas com botão de envio */}
         <div className="rounded-xl border" style={{ background: "#111", borderColor: "#1e4f5c" }}>
           <div className="px-5 py-4" style={{ borderBottom: "1px solid #1e4f5c" }}>
-            <span className="text-sm font-medium" style={{ color: "#e5e5e5" }}>Histórico de Tarefas</span>
+            <span className="text-sm font-medium" style={{ color: "#e5e5e5" }}>Histórico de Tarefas ({tasks.length})</span>
           </div>
           {isLoading ? (
             <div className="p-5 space-y-2">
@@ -269,6 +298,7 @@ export default function ClientDetail() {
           ) : tasks.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-sm" style={{ color: "#a1a1aa" }}>Nenhuma tarefa registrada</p>
+              <p className="text-xs mt-1" style={{ color: "#52525b" }}>Use o Painel Mensal para gerar as tarefas do mês</p>
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -278,6 +308,7 @@ export default function ClientDetail() {
                   <th className="text-left px-5 py-3 text-xs font-medium hidden md:table-cell" style={{ color: "#a1a1aa" }}>Competência</th>
                   <th className="text-left px-5 py-3 text-xs font-medium hidden md:table-cell" style={{ color: "#a1a1aa" }}>Vencimento</th>
                   <th className="text-left px-5 py-3 text-xs font-medium" style={{ color: "#a1a1aa" }}>Status</th>
+                  <th className="text-right px-5 py-3 text-xs font-medium" style={{ color: "#a1a1aa" }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -296,6 +327,18 @@ export default function ClientDetail() {
                       {new Date(task.dueDate).toLocaleDateString("pt-BR")}
                     </td>
                     <td className="px-5 py-3"><StatusBadge status={task.status} /></td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openUploadDialog(task.id)}
+                          className="p-1.5 rounded hover:bg-white/5 transition-colors" style={{ color: "#9fd4dc" }} title="Anexar guia">
+                          <Upload size={14} />
+                        </button>
+                        <button onClick={() => openEmailDialog(task.id)}
+                          className="p-1.5 rounded hover:bg-white/5 transition-colors" style={{ color: "#9fd4dc" }} title="Enviar por e-mail">
+                          <Mail size={14} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -303,7 +346,36 @@ export default function ClientDetail() {
           )}
         </div>
 
-        {/* Email history */}
+        {/* Recorrentes */}
+        {recurring.length > 0 && (
+          <div className="rounded-xl border" style={{ background: "#111", borderColor: "#1e4f5c" }}>
+            <div className="flex items-center gap-2 px-5 py-4" style={{ borderBottom: "1px solid #1e4f5c" }}>
+              <RefreshCw size={15} style={{ color: "#9fd4dc" }} />
+              <span className="text-sm font-medium" style={{ color: "#e5e5e5" }}>Recorrentes Geradas ({recurring.length})</span>
+            </div>
+            <div className="divide-y" style={{ borderColor: "rgba(30,79,92,0.4)" }}>
+              {recurring.map((rt) => (
+                <div key={rt.id} className="flex items-center justify-between px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <TaskTypeBadge type={rt.taskType} />
+                    <span className="text-sm" style={{ color: "#e5e5e5" }}>{rt.title}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs" style={{ color: "#a1a1aa" }}>Vence dia {rt.dueDayOfMonth}</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                      style={rt.active
+                        ? { background: "rgba(34,197,94,0.12)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.3)" }
+                        : { background: "rgba(82,82,91,0.2)", color: "#a1a1aa", border: "1px solid rgba(82,82,91,0.4)" }}>
+                      {rt.active ? "Ativa" : "Inativa"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Email logs */}
         {emailLogs.length > 0 && (
           <div className="rounded-xl border" style={{ background: "#111", borderColor: "#1e4f5c" }}>
             <div className="flex items-center gap-2 px-5 py-4" style={{ borderBottom: "1px solid #1e4f5c" }}>
@@ -318,12 +390,10 @@ export default function ClientDetail() {
                     <p className="text-xs mt-0.5" style={{ color: "#a1a1aa" }}>{log.recipientEmail}</p>
                   </div>
                   <div className="text-right">
-                    <span
-                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
                       style={log.status === "ENVIADO"
                         ? { background: "rgba(34,197,94,0.12)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.3)" }
-                        : { background: "rgba(239,68,68,0.12)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)" }}
-                    >
+                        : { background: "rgba(239,68,68,0.12)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)" }}>
                       {log.status === "ENVIADO" ? "Enviado" : "Falhou"}
                     </span>
                     <p className="text-xs mt-1" style={{ color: "#52525b" }}>{new Date(log.sentAt).toLocaleDateString("pt-BR")}</p>
@@ -342,17 +412,14 @@ export default function ClientDetail() {
             <DialogTitle style={{ color: "#e5e5e5" }}>Aplicar Catálogo ao Cliente</DialogTitle>
           </DialogHeader>
           <p className="text-xs mt-1 mb-3" style={{ color: "#a1a1aa" }}>
-            Todas as tarefas do catálogo selecionado serão adicionadas ao cliente de uma vez.
+            Todas as tarefas do catálogo serão adicionadas de uma vez. Você pode remover individualmente depois.
           </p>
           <div className="space-y-2 max-h-80 overflow-y-auto">
             {catalogs.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => handleApplyCatalog(cat.id)}
+              <button key={cat.id} onClick={() => handleApplyCatalog(cat.id)}
                 disabled={applyCatalogMutation.isPending}
                 className="w-full flex items-center justify-between px-4 py-3 rounded-lg text-left hover:bg-white/5 transition-colors"
-                style={{ border: "1px solid rgba(30,79,92,0.5)" }}
-              >
+                style={{ border: "1px solid rgba(30,79,92,0.5)" }}>
                 <div>
                   <p className="text-sm font-medium" style={{ color: "#e5e5e5" }}>{cat.name}</p>
                   {cat.description && <p className="text-xs" style={{ color: "#52525b" }}>{cat.description}</p>}
@@ -368,22 +435,17 @@ export default function ClientDetail() {
       <Dialog open={addTemplateOpen} onOpenChange={setAddTemplateOpen}>
         <DialogContent style={{ background: "#111", borderColor: "#1e4f5c", color: "#e5e5e5" }}>
           <DialogHeader>
-            <DialogTitle style={{ color: "#e5e5e5" }}>Adicionar Obrigação ao Cliente</DialogTitle>
+            <DialogTitle style={{ color: "#e5e5e5" }}>Adicionar Obrigação</DialogTitle>
           </DialogHeader>
           <div className="space-y-2 mt-2 max-h-96 overflow-y-auto">
             {availableTemplates.length === 0 ? (
-              <p className="text-sm text-center py-6" style={{ color: "#a1a1aa" }}>
-                Todos os templates já foram adicionados a este cliente.
-              </p>
+              <p className="text-sm text-center py-6" style={{ color: "#a1a1aa" }}>Todas as obrigações já foram adicionadas.</p>
             ) : (
               availableTemplates.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => handleAddTemplate(t.id)}
+                <button key={t.id} onClick={() => handleAddTemplate(t.id)}
                   disabled={addTemplateMutation.isPending}
                   className="w-full flex items-center justify-between px-4 py-3 rounded-lg text-left hover:bg-white/5 transition-colors"
-                  style={{ border: "1px solid rgba(30,79,92,0.5)" }}
-                >
+                  style={{ border: "1px solid rgba(30,79,92,0.5)" }}>
                   <div className="flex items-center gap-3">
                     <TaskTypeBadge type={t.taskType} />
                     <div>
@@ -396,6 +458,96 @@ export default function ClientDetail() {
               ))
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Dialog */}
+      <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+        <DialogContent style={{ background: "#111", borderColor: "#1e4f5c", color: "#e5e5e5" }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: "#e5e5e5" }}>Anexar Guia à Tarefa</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer hover:border-teal-500/50 transition-colors"
+              style={{ borderColor: "#1e4f5c" }} onClick={() => fileInputRef.current?.click()}>
+              <Upload size={28} className="mx-auto mb-3" style={{ color: "#52525b" }} />
+              {selectedFile ? (
+                <div>
+                  <p className="text-sm font-medium" style={{ color: "#9fd4dc" }}>{selectedFile.name}</p>
+                  <p className="text-xs mt-1" style={{ color: "#a1a1aa" }}>{(selectedFile.size / 1024).toFixed(0)} KB</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm" style={{ color: "#a1a1aa" }}>Clique para selecionar o arquivo</p>
+                  <p className="text-xs mt-1" style={{ color: "#52525b" }}>PDF, imagens até 10MB</p>
+                </div>
+              )}
+              <input ref={fileInputRef} type="file" accept=".pdf,.png,.jpg,.jpeg" className="hidden"
+                onChange={(e) => e.target.files?.[0] && setSelectedFile(e.target.files[0])} />
+            </div>
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setUploadDialogOpen(false)} className="flex-1"
+                style={{ borderColor: "#1e4f5c", color: "#a1a1aa" }}>Cancelar</Button>
+              <Button onClick={handleUpload} disabled={!selectedFile || uploadMutation.isPending} className="flex-1"
+                style={{ background: "#24646c", color: "#fff" }}>
+                {uploadMutation.isPending ? "Enviando..." : "Fazer Upload"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Email Dialog */}
+      <Dialog open={emailDialogOpen} onOpenChange={setEmailDialogOpen}>
+        <DialogContent style={{ background: "#111", borderColor: "#1e4f5c", color: "#e5e5e5" }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: "#e5e5e5" }}>Enviar Guia por E-mail</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSendEmail} className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label style={{ color: "#a1a1aa" }}>Destinatário *</Label>
+              <Input type="email" value={emailForm.to}
+                onChange={(e) => setEmailForm({ ...emailForm, to: e.target.value })}
+                placeholder={client?.email}
+                style={{ background: "#0d1f22", borderColor: "#1e4f5c", color: "#e5e5e5" }} />
+            </div>
+            <div className="space-y-1.5">
+              <Label style={{ color: "#a1a1aa" }}>Assunto (opcional)</Label>
+              <Input value={emailForm.subject}
+                onChange={(e) => setEmailForm({ ...emailForm, subject: e.target.value })}
+                placeholder="Guia — competência"
+                style={{ background: "#0d1f22", borderColor: "#1e4f5c", color: "#e5e5e5" }} />
+            </div>
+            {taskFiles.length > 0 && (
+              <div className="space-y-1.5">
+                <Label style={{ color: "#a1a1aa" }}>Anexar arquivo</Label>
+                <Select value={selectedFileId ? String(selectedFileId) : "none"}
+                  onValueChange={(v) => setSelectedFileId(v !== "none" ? Number(v) : undefined)}>
+                  <SelectTrigger style={{ background: "#0d1f22", borderColor: "#1e4f5c", color: "#e5e5e5" }}>
+                    <SelectValue placeholder="Sem anexo" />
+                  </SelectTrigger>
+                  <SelectContent style={{ background: "#111", borderColor: "#1e4f5c" }}>
+                    <SelectItem value="none" style={{ color: "#a1a1aa" }}>Sem anexo</SelectItem>
+                    {taskFiles.map((f) => (
+                      <SelectItem key={f.id} value={String(f.id)} style={{ color: "#e5e5e5" }}>{f.filename}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(36,100,108,0.1)", color: "#9fd4dc", border: "1px solid rgba(36,100,108,0.2)" }}>
+              O e-mail será enviado com o template padrão Equilibrium com os dados da tarefa e competência.
+            </div>
+            <div className="flex gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={() => setEmailDialogOpen(false)} className="flex-1"
+                style={{ borderColor: "#1e4f5c", color: "#a1a1aa" }}>Cancelar</Button>
+              <Button type="submit" disabled={sendEmailMutation.isPending} className="flex-1 gap-2"
+                style={{ background: "#24646c", color: "#fff" }}>
+                <Send size={13} />
+                {sendEmailMutation.isPending ? "Enviando..." : "Enviar E-mail"}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
     </AppLayout>

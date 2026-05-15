@@ -316,9 +316,14 @@ export async function updateTaskTemplate(id: number, data: Partial<InsertTaskTem
 }
 
 // ─── Client Task Templates ────────────────────────────────────────────────────
-export async function listClientTaskTemplates(clientId: number): Promise<ClientTaskTemplate[]> {
+export async function listClientTaskTemplates(clientId: number, activeOnly = true): Promise<ClientTaskTemplate[]> {
   const db = await getDb();
   if (!db) return [];
+  if (activeOnly) {
+    return db.select().from(clientTaskTemplates).where(
+      and(eq(clientTaskTemplates.clientId, clientId), eq(clientTaskTemplates.active, true))
+    );
+  }
   return db.select().from(clientTaskTemplates).where(eq(clientTaskTemplates.clientId, clientId));
 }
 
@@ -332,7 +337,8 @@ export async function addClientTaskTemplate(data: InsertClientTaskTemplate): Pro
 export async function removeClientTaskTemplate(id: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.update(clientTaskTemplates).set({ active: false }).where(eq(clientTaskTemplates.id, id));
+  // Hard delete so the template can be re-added later without conflict
+  await db.delete(clientTaskTemplates).where(eq(clientTaskTemplates.id, id));
 }
 
 export async function getMonthlyPanel(month: number, year: number): Promise<{
@@ -452,7 +458,8 @@ export async function applyCatalogToClient(clientId: number, catalogId: number):
   const db = await getDb();
   if (!db) return 0;
   const items = await getCatalogTemplates(catalogId);
-  const existing = await listClientTaskTemplates(clientId);
+  // Only check active ones - inactive ones were deleted and can be re-added
+  const existing = await listClientTaskTemplates(clientId, true);
   const existingIds = new Set(existing.map((e) => e.taskTemplateId));
   let added = 0;
   for (const item of items) {

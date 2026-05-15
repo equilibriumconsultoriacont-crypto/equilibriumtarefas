@@ -87,25 +87,10 @@ export async function autoSendPendingGuias(): Promise<{
         const attachmentFilename = file.filename || "guia.pdf";
         const attachmentMime = file.mimeType || "application/pdf";
         try {
-          const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL ?? "";
-          const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY ?? "";
-          if (forgeApiUrl && forgeApiKey && file.fileKey) {
-            const presignResp = await fetch(
-              `${forgeApiUrl.replace(/\/+$/, "")}/v1/storage/presign/get?path=${encodeURIComponent(file.fileKey)}`,
-              { headers: { Authorization: `Bearer ${forgeApiKey}` } }
-            );
-            if (presignResp.ok) {
-              const { url: signedUrl } = (await presignResp.json()) as { url: string };
-              const fileResp = await fetch(signedUrl);
-              if (fileResp.ok) {
-                attachmentBuffer = Buffer.from(await fileResp.arrayBuffer());
-              } else {
-                console.warn(`[AutoSend] File fetch failed for task ${task.id}: HTTP ${fileResp.status}`);
-              }
-            } else {
-              console.warn(`[AutoSend] Presign failed for task ${task.id}: HTTP ${presignResp.status}`);
-            }
-          }
+          const { storageGetBuffer } = await import("./storage");
+          const buf = await storageGetBuffer(file.fileKey, file.fileUrl);
+          if (buf) attachmentBuffer = buf;
+          else console.warn(`[AutoSend] Could not load attachment for task ${task.id}`);
         } catch (attachErr) {
           console.warn(`[AutoSend] Could not fetch attachment for task ${task.id}:`, attachErr);
         }
