@@ -172,8 +172,8 @@ class SDKServer {
     return this.signSession(
       {
         openId,
-        appId: ENV.appId,
-        name: options.name || "",
+        appId: ENV.appId || "local",
+        name: options.name || "user",  // never empty — verifySession requires non-empty
       },
       options
     );
@@ -213,19 +213,16 @@ class SDKServer {
       });
       const { openId, appId, name } = payload as Record<string, unknown>;
 
-      if (
-        !isNonEmptyString(openId) ||
-        !isNonEmptyString(appId) ||
-        !isNonEmptyString(name)
-      ) {
-        console.warn("[Auth] Session payload missing required fields");
+      // Only openId is strictly required; appId and name can be empty for local auth
+      if (!isNonEmptyString(openId)) {
+        console.warn("[Auth] Session payload missing openId");
         return null;
       }
 
       return {
-        openId,
-        appId,
-        name,
+        openId: openId as string,
+        appId: isNonEmptyString(appId) ? appId : "local",
+        name: isNonEmptyString(name) ? name : "",
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));

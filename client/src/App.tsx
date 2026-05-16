@@ -27,8 +27,7 @@ function Router() {
     return (
       <div style={{ minHeight: "100vh", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", color: "#a1a1aa" }}>
-          <div style={{ width: 40, height: 40, border: "3px solid #24646c", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 16px" }} />
-          Carregando...
+          <p>Carregando...</p>
         </div>
       </div>
     );

@@ -70,26 +70,27 @@ const clientsRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      const id = await createClient({ ...input, active: true });
+      const id = await createClient({ ...input, email: input.email.trim().toLowerCase(), active: true });
       return { id };
     }),
 
   update: protectedProcedure
     .input(
       z.object({
-        id: z.number(),
-        name: z.string().min(2).optional(),
+        id: z.number().positive(),
+        name: z.string().min(2).max(255).optional(),
         cnpj: z.string().optional(),
         cpf: z.string().optional(),
         documentType: z.enum(["CNPJ", "CPF"]).optional(),
         email: z.string().email().optional(),
-        phone: z.string().optional(),
-        notes: z.string().optional(),
+        phone: z.string().max(20).optional(),
+        notes: z.string().max(2000).optional(),
         active: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {
       const { id, ...data } = input;
+      if (data.email) data.email = data.email.trim().toLowerCase();
       await updateClient(id, data);
       return { success: true };
     }),
@@ -1010,6 +1011,22 @@ const clientAccessRouter = router({
   }),
 });
 
+
+// ─── Health Router ────────────────────────────────────────────────────────────
+const healthRouter = router({
+  check: publicProcedure.query(async () => {
+    const { checkDbHealth } = await import("./db");
+    const db = await checkDbHealth();
+    return {
+      status: db.ok ? "ok" : "degraded",
+      uptime: process.uptime(),
+      memory: process.memoryUsage().heapUsed,
+      db,
+      timestamp: new Date().toISOString(),
+    };
+  }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -1017,9 +1034,9 @@ export const appRouter = router({
     login: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string().min(6) }))
       .mutation(async ({ input, ctx }) => {
-        const user = await getUserByEmail(input.email);
+        const user = await getUserByEmail(input.email.trim().toLowerCase());
         if (!user || !user.passwordHash) {
-          throw new Error("Credenciais inválidas");
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Credenciais inválidas" });
         }
         const isValidPassword = await bcryptjs.compare(input.password, user.passwordHash);
         if (!isValidPassword) {
@@ -1084,6 +1101,7 @@ export const appRouter = router({
   files: filesRouter,
   email: emailRouter,
   autoSend: autoSendRouter,
+  health: healthRouter,
   taskTemplates: taskTemplatesRouter,
   taskCatalogs: taskCatalogsRouter,
   clientTemplates: clientTemplatesRouter,
