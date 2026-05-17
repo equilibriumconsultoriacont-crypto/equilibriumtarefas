@@ -1009,6 +1009,32 @@ const clientAccessRouter = router({
       lastSignedIn: usersTable.lastSignedIn,
     }).from(usersTable).where(eq(usersTable.role, "client"));
   }),
+
+  deleteLogin: protectedProcedure
+    .input(z.object({ id: z.number().positive() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { users: usersTable } = await import("../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.delete(usersTable).where(eq(usersTable.id, input.id));
+      return { success: true };
+    }),
+
+  resetClientPassword: protectedProcedure
+    .input(z.object({
+      id: z.number().positive(),
+      newPassword: z.string().min(6).max(100),
+    }))
+    .mutation(async ({ input }) => {
+      const passwordHash = await bcryptjs.hash(input.newPassword, 10);
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { users: usersTable } = await import("../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, input.id));
+      return { success: true };
+    }),
 });
 
 
@@ -1078,7 +1104,7 @@ export const appRouter = router({
     forgotPassword: publicProcedure
       .input(z.object({ email: z.string().email() }))
       .mutation(async ({ input }) => {
-        const user = await getUserByEmail(input.email);
+        const user = await getUserByEmail(input.email.trim().toLowerCase());
         if (!user) return { success: true }; // Não revelar se e-mail existe
         const token = crypto.randomUUID().replace(/-/g, "");
         const expiresAt = new Date(Date.now() + 1000 * 60 * 60); // 1 hora

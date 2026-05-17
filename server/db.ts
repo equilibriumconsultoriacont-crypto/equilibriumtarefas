@@ -319,17 +319,17 @@ export async function listEmailLogs(taskId?: number, clientId?: number): Promise
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 export async function getDashboardStats() {
   const db = await getDb();
-  if (!db) return { total: 0, pendente: 0, emAndamento: 0, concluida: 0, vencida: 0, clientesAtivos: 0 };
+  if (!db) return { total: 0, pendentes: 0, emAndamento: 0, concluidas: 0, vencidas: 0, clientesAtivos: 0 };
   const [allTasks, allClients] = await Promise.all([
     db.select().from(tasks),
     db.select().from(clients).where(eq(clients.active, true)),
   ]);
   return {
     total: allTasks.length,
-    pendente: allTasks.filter((t) => t.status === "PENDENTE").length,
+    pendentes: allTasks.filter((t) => t.status === "PENDENTE").length,
     emAndamento: allTasks.filter((t) => t.status === "EM_ANDAMENTO").length,
-    concluida: allTasks.filter((t) => t.status === "CONCLUIDA").length,
-    vencida: allTasks.filter((t) => t.status === "VENCIDA").length,
+    concluidas: allTasks.filter((t) => t.status === "CONCLUIDA").length,
+    vencidas: allTasks.filter((t) => t.status === "VENCIDA").length,
     clientesAtivos: allClients.length,
   };
 }
